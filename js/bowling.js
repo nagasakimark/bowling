@@ -1,12 +1,12 @@
 // ============================================================
-//  STRIKE BOWLING — scenes: Menu → Setup → Game (10 frames)
+//  KIRBY BOWLING — scenes: Menu → Setup → Game (5 frames by default)
 //  Categories come from js/data.js (same list as nagasakimark/poll).
 // ============================================================
 'use strict';
 
-const MENU_THEME = { primary: '#3B1C8C', secondary: '#D9CCFF', background: '#EFE8FF', accent: '#FF7A00', buttonColor: '#6A3DE8' };
+const MENU_THEME = { primary: '#A0185E', secondary: '#FFC9E3', background: '#FFF0F7', accent: '#FF7A00', buttonColor: '#FF4F9F' };
 const TILE_COLORS = ['#FF6B6B', '#4ECDC4', '#FFD93D', '#FF9F43', '#54A0FF', '#8E6CEF', '#FF8FD8', '#00D2D3'];
-const BALL_COLORS = ['#ff3b5c', '#2f7bff', '#ffae00', '#1fbf5b'];
+const BALL_COLORS = ['#ff5fa2', '#3a7bff', '#e8a800', '#28b552', '#a256ff', '#ff7a1a'];   // Kirby ball colours
 const TEAM_COLORS = ['#ff4d6d', '#2f9bff', '#f5a300', '#1fbf5b', '#9b5cff', '#ff7a1a'];
 const TEAM_NAMES = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -208,65 +208,132 @@ function drawBall(ctx, x, y, r, color, rot = 0, o = {}) {
   ctx.restore();
 }
 
-// "Pinny" — the bowling-pin host
-function drawPinny(ctx, x, y, h, mood, t) {
+// ---------------- Kirby assets (from the original Kirby Bowling PowerPoint) ----------------
+const K = f => `kirby/${f}`;
+const KIMG = {
+  idle: K('kirby.png'), happy: K('happy.png'), sad: K('sad.png'), angry: K('angry.png'), double: K('double.png'),
+  mk: K('metaknight.png'), mkDash: K('metaknight-dash.png'), boom: K('explosion.png'), light: K('light.png'),
+  sweat: K('sweat.png'), sign: K('sign.png')
+};
+const ballSrc = i => K(`ball${i % 6}.png`);
+function preloadKirby() {
+  Object.values(KIMG).forEach(s => Images.load(s));
+  for (let i = 0; i < 6; i++) Images.load(ballSrc(i));
+}
+Sound.files = {
+  strike: K('strike.mp3'), roll: K('roll.mp3'), slash: K('slash.mp3'), impact: K('impact.mp3'), crowd: K('crowd.mp3'),
+  next: K('next.mp3'), poke: K('poke.mp3'), pk: K('v-pkflash.mp3'), gaow: K('v-gaow.mp3'),
+  ohahh: K('v-ohahh.mp3'), eeyee: K('v-eeyee.mp3'), graaah: K('v-graaah.mp3'),
+  uhawa: K('v-uhawa.mp3'), uheeha: K('v-uheeha.mp3'), yaaa: K('v-yaaa.mp3'),
+  haragong: K('v-haragong.mp3'), awe: K('v-awe.mp3'), chitzu: K('v-chitzu.mp3')
+};
+
+// Background music streams from <audio> (no big decode on Chromebooks)
+const Music = {
+  tracks: { title: K('bgm-title.mp3'), game: K('bgm-game.mp3'), end: K('bgm-end.mp3') },
+  vol: 0.3, k: 1, el: null, name: null,
+  play(name) {
+    if (this.name === name && this.el) { this.kick(); return; }
+    this.stop();
+    const a = new Audio(this.tracks[name]);
+    a.loop = name !== 'end';
+    this.el = a; this.name = name;
+    this.sync();
+    this.kick();
+  },
+  kick() { if (this.el && this.el.paused) { const p = this.el.play(); if (p && p.catch) p.catch(() => {}); } },
+  stop() {
+    const a = this.el;
+    this.el = null; this.name = null;
+    if (!a) return;
+    let v = a.volume;
+    const iv = setInterval(() => { v -= 0.05; if (v <= 0) { clearInterval(iv); a.pause(); } else a.volume = v; }, 40);
+  },
+  sync() { if (this.el) this.el.volume = Sound.muted ? 0 : this.vol * this.k; },
+  duck(k, dur) {
+    this.k = k; this.sync();
+    clearTimeout(this.duckT);
+    this.duckT = setTimeout(() => { this.k = 1; this.sync(); }, dur * 1000);
+  }
+};
+// browsers only allow music after the first tap/key
+['pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, () => Music.kick(), true));
+
+// A Kirby ball. sx/sy squash it (bottom stays on the floor); item puts a picture badge on it.
+function drawKirbyBall(ctx, x, y, r, idx, rot = 0, o = {}) {
+  if (!(r >= 1)) return;
+  const img = Images.get(ballSrc(idx));
+  const sx = o.sx || 1, sy = o.sy || 1;
   ctx.save();
   ctx.translate(x, y);
-  let sx = 1, sy = 1, rot = 0;
-  if (mood === 'happy') { const b = Math.abs(Math.sin(t * 9)); ctx.translate(0, -b * 26); sy = 1 + b * 0.04; sx = 1 - b * 0.03; }
-  else if (mood === 'sad') { rot = -0.12 + Math.sin(t * 2) * 0.02; sy = 0.96; }
-  else { rot = Math.sin(t * 2.2) * 0.04; sy = 1 + Math.sin(t * 4.4) * 0.015; }
+  if (o.alpha !== undefined) ctx.globalAlpha *= o.alpha;
+  if (!o.noShadow) {
+    ctx.fillStyle = 'rgba(40,0,30,0.3)';
+    ctx.beginPath(); ctx.ellipse(r * 0.1, r * 0.92, r * 0.95 * sx, r * 0.26, 0, 0, TAU); ctx.fill();
+  }
+  ctx.save();
+  ctx.translate(0, r * (1 - sy));
+  ctx.scale(sx, sy);
+  ctx.rotate(rot);
+  if (img) ctx.drawImage(img, -r, -r, r * 2, r * 2);
+  else { ctx.fillStyle = BALL_COLORS[idx % 6]; ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill(); }
+  ctx.restore();
+  if (o.item && r > 8) {
+    const br = r * 0.5, bx = r * 0.68 * sx, by = r * 0.52 + r * (1 - sy);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.arc(bx + 2, by + 3, br, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(bx, by, Math.max(1, br - 2), 0, TAU); ctx.clip();
+    drawItem(ctx, o.item, bx, by, br * 1.8);
+    ctx.restore();
+    ctx.lineWidth = Math.max(2, r * 0.07);
+    ctx.strokeStyle = BALL_COLORS[idx % 6];
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Kirby the host. mood: idle | ready | watch | happy | sad | angry
+function drawKirbyHost(ctx, x, y, size, mood, t, lean = 0) {
+  const src = { happy: KIMG.happy, sad: KIMG.sad, angry: KIMG.angry }[mood] || KIMG.idle;
+  const img = Images.get(src);
+  ctx.save();
+  ctx.translate(x, y);
+  let sx = 1, sy = 1, rot = lean, dy = 0, dx = 0;
+  if (mood === 'happy') { const b = Math.abs(Math.sin(t * 8)); dy = -b * 34; sy = 1 + b * 0.06; sx = 1 - b * 0.05; rot += Math.sin(t * 8) * 0.06; }
+  else if (mood === 'ready') { sy = 0.86 + Math.sin(t * 30) * 0.015; sx = 1.1; dx = Math.sin(t * 40) * 1.5; }
+  else if (mood === 'watch') { rot += 0.12; sy = 1.02; dx = 6; }
+  else if (mood === 'sad') { sy = 0.95 + Math.sin(t * 2) * 0.01; rot += Math.sin(t * 1.6) * 0.03; }
+  else if (mood === 'angry') { dx = Math.sin(t * 50) * 3; sy = 1 + Math.sin(t * 9) * 0.03; }
+  else { sy = 1 + Math.sin(t * 3.2) * 0.03; sx = 1 - Math.sin(t * 3.2) * 0.02; dy = -Math.abs(Math.sin(t * 1.6)) * 4; }
+  ctx.fillStyle = 'rgba(40,0,30,0.28)';
+  ctx.beginPath(); ctx.ellipse(0, 0, size * 0.42 * (dy < -10 ? 0.8 : 1), size * 0.09, 0, 0, TAU); ctx.fill();
+  ctx.translate(dx, dy);
   ctx.rotate(rot);
   ctx.scale(sx, sy);
-  drawPin(ctx, 0, 0, h, { stripe: '#ff3b8a' });
-  // arms
-  ctx.strokeStyle = '#3a2f5c'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-  const a = mood === 'happy' ? 1.0 + Math.sin(t * 18) * 0.4 : mood === 'sad' ? -1.0 : -0.35 + Math.sin(t * 3) * 0.15;
-  [-1, 1].forEach(s => {
-    const sx0 = s * h * 0.15, sy0 = -h * 0.42, L = h * 0.16;
-    const ex2 = sx0 + s * Math.cos(a) * L, ey2 = sy0 - Math.sin(a) * L;
-    ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(ex2, ey2); ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(ex2, ey2, 7, 0, TAU); ctx.fill(); ctx.stroke();
-  });
-  // face
-  const fy = -h * 0.36, ex = h * 0.06;
-  ctx.fillStyle = '#2a2140';
-  ctx.strokeStyle = '#2a2140';
-  ctx.lineWidth = 4;
-  if (mood === 'happy') {
-    [-1, 1].forEach(s => { ctx.beginPath(); ctx.arc(s * ex, fy + 4, 7, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); });
-  } else {
-    const blink = mood !== 'sad' && (t % 3.4) > 3.25;
-    [-1, 1].forEach(s => {
-      ctx.beginPath();
-      ctx.ellipse(s * ex, fy, 6.5, blink ? 1.2 : 9.5, 0, 0, TAU); ctx.fill();
-      if (!blink) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s * ex + 2, fy - 3.5, 2.6, 0, TAU); ctx.fill(); ctx.fillStyle = '#2a2140'; }
-    });
-    if (mood === 'sad') {
-      [-1, 1].forEach(s => { ctx.beginPath(); ctx.moveTo(s * (ex + 9), fy - 12); ctx.lineTo(s * (ex - 6), fy - 19); ctx.stroke(); });
-    }
+  if (img) {
+    const k = size / Math.max(img.naturalWidth, img.naturalHeight);
+    const w = img.naturalWidth * k, h = img.naturalHeight * k;
+    ctx.drawImage(img, -w / 2, -h, w, h);
   }
-  ctx.fillStyle = 'rgba(255,110,150,0.55)';
-  [-1, 1].forEach(s => { ctx.beginPath(); ctx.ellipse(s * ex * 1.85, fy + 13, 8, 5, 0, 0, TAU); ctx.fill(); });
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  if (mood === 'happy') { ctx.fillStyle = '#c2185b'; ctx.arc(0, fy + 16, 10, 0, Math.PI); ctx.fill(); }
-  else if (mood === 'sad') { ctx.arc(0, fy + 26, 8, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
-  else { ctx.arc(0, fy + 13, 7, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke(); }
-  if (mood === 'sad') { // sweat drop
-    ctx.fillStyle = '#7fd3ff';
-    ctx.beginPath(); ctx.moveTo(h * 0.15, fy - 22); ctx.quadraticCurveTo(h * 0.15 + 9, fy - 6, h * 0.15, fy - 4); ctx.quadraticCurveTo(h * 0.15 - 9, fy - 6, h * 0.15, fy - 22); ctx.fill();
+  if (mood === 'sad' || mood === 'angry') {
+    const sw = Images.get(KIMG.sweat);
+    if (sw) {
+      const f = Math.floor(t / 0.08) % 25, s = size * 1.7;
+      ctx.drawImage(sw, f * 160, 0, 160, 160, -s / 2 + size * 0.08, -size * 0.5 - s / 2 - size * 0.22, s, s);
+    }
   }
   ctx.restore();
 }
 
 // ---------------- settings ----------------
 const Settings = {
-  mode: 'pic2word', teams: 1, bteams: 4, frames: 10, kana: false,
+  mode: 'pic2word', teams: 1, bteams: 4, frames: 5, kana: false,
   load() {
     try {
-      const s = JSON.parse(localStorage.getItem('strikebowling') || '{}');
+      const s = JSON.parse(localStorage.getItem('kirbybowling') || '{}');
       if (s.muted) Sound.setMuted(true);
       if (MODES.some(m => m.key === s.mode)) this.mode = s.mode;
       if (s.teams === 1 || s.teams === 2) this.teams = s.teams;
@@ -276,13 +343,13 @@ const Settings = {
     } catch (e) {}
   },
   save() {
-    try { localStorage.setItem('strikebowling', JSON.stringify({ muted: Sound.muted, mode: this.mode, teams: this.teams, bteams: this.bteams, frames: this.frames, kana: this.kana })); } catch (e) {}
+    try { localStorage.setItem('kirbybowling', JSON.stringify({ muted: Sound.muted, mode: this.mode, teams: this.teams, bteams: this.bteams, frames: this.frames, kana: this.kana })); } catch (e) {}
   }
 };
 function toggleFullscreen() {
   try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch (e) {}
 }
-function toggleMute() { Sound.setMuted(!Sound.muted); Settings.save(); }
+function toggleMute() { Sound.setMuted(!Sound.muted); Music.sync(); Settings.save(); }
 function cornerButtons(color) {
   return [
     new Button({ x: 1164, y: 44, w: 54, circle: true, color, icon: Icons.sound, onClick: toggleMute }),
@@ -321,9 +388,10 @@ const LoadingScene = {
   enter() {
     Promise.race([
       Promise.all(['40px "Luckiest Guy"', '700 40px "Fredoka"', '600 40px "Fredoka"', '500 40px "Fredoka"']
-        .map(f => (document.fonts ? document.fonts.load(f) : null)).concat([Images.load(ALLEY.src)])),
+        .map(f => (document.fonts ? document.fonts.load(f) : null)).concat([Images.load(ALLEY.src), Images.load(KIMG.idle), Images.load(ballSrc(0))])),
       new Promise(r => setTimeout(r, 3000))
     ]).catch(() => {}).then(() => {
+      preloadKirby();
       Object.values(POLLS).forEach(p => { const it = p.items[0]; if (it.image) Images.load(`img/${it.image}.png`); });
       // a link like bowling/#colors opens that category's setup directly
       const want = decodeURIComponent(location.hash.slice(1));
@@ -333,7 +401,7 @@ const LoadingScene = {
   draw(ctx) {
     drawPolka(ctx, MENU_THEME, Engine.realTime);
     const t = Engine.realTime;
-    drawBall(ctx, 640 + Math.sin(t * 3) * 60, 350, 40, '#6A3DE8', t * 6);
+    drawKirbyBall(ctx, 640 + Math.sin(t * 3) * 60, 350, 42, 0, Math.cos(t * 3) * 1.5);
     txt(ctx, 'LOADING', 640, 430, { size: 36, fill: MENU_THEME.primary, shadow: false });
   }
 };
@@ -355,6 +423,7 @@ const MenuScene = {
     Tween.to(this.head, { s: 1 }, 0.6, { ease: Ease.outElastic });
     this.buttons = cornerButtons(MENU_THEME.buttonColor);
     this.leaving = false;
+    Music.play('title');
   },
   tileAt(x, y) { return this.tiles.find(t => t.appear > 0.5 && Math.abs(x - t.x) < t.w / 2 && Math.abs(y - t.y) < t.h / 2); },
   isHot(x, y) { return !!this.tileAt(x, y) || this.buttons.some(b => b.hit(x, y)); },
@@ -389,14 +458,14 @@ const MenuScene = {
     ctx.save();
     ctx.translate(640, 118);
     ctx.scale(this.head.s, this.head.s);
-    // little pins knocked by a ball either side of the title
-    for (let i = 0; i < 3; i++) drawPin(ctx, -400 + i * 26, 40 - (i === 1 ? 12 : 0), 62, { rot: Math.sin(t * 3 + i) * 0.08 });
-    drawBall(ctx, 400, 18, 30, '#ff3b5c', t * 3);
-    txt(ctx, 'STRIKE BOWLING', 0, 0, { size: 76, fill: { grad: ['#ffffff', '#ffe27a', '#ffb300'] }, stroke: MENU_THEME.primary, lw: 14, shadow: 'rgba(60,20,120,0.35)', shadowDist: 8 });
+    drawKirbyHost(ctx, -400, 52, 110, 'idle', t);
+    for (let i = 0; i < 3; i++) drawPin(ctx, 372 + i * 26, 46 - (i === 1 ? 12 : 0), 62, { rot: Math.sin(t * 3 + i) * 0.08 });
+    drawKirbyBall(ctx, 312 + Math.sin(t * 1.4) * 8, 22, 26, 0, Math.sin(t * 1.4) * 0.6);
+    txt(ctx, 'KIRBY BOWLING', 0, 0, { size: 76, fill: { grad: ['#ffffff', '#ffe27a', '#ffb300'] }, stroke: MENU_THEME.primary, lw: 14, shadow: 'rgba(60,20,120,0.35)', shadowDist: 8 });
     ctx.restore();
     txt(ctx, 'Pick a category!  カテゴリーを えらんでね', 640, 196, { size: 26, font: FONT_ROUND, fill: MENU_THEME.primary, shadow: false });
     for (const tl of this.tiles) this.drawTile(ctx, tl, t);
-    txt(ctx, 'In the game:  1–4 roll a ball  ·  ENTER next  ·  Q hide question  ·  K katakana  ·  ESC back  ·  M mute  ·  F fullscreen', 640, 706, {
+    txt(ctx, 'In the game:  1–6 roll a ball  ·  ENTER next  ·  Q (or tap Kirby) hide question  ·  K katakana  ·  ESC back  ·  M mute  ·  F fullscreen', 640, 706, {
       size: 15, font: FONT_ROUND, weight: '600', fill: 'rgba(60,20,120,0.5)', shadow: false
     });
     this.buttons.forEach(b => b.draw(ctx));
@@ -456,6 +525,7 @@ const SetupScene = {
     this.backBtn = new Button({ x: 46, y: 44, w: 58, circle: true, color: th.buttonColor, icon: Icons.back, onClick: () => this.leave() });
     this.corner = cornerButtons(th.buttonColor);
     this.rebuildTeams();
+    Music.play('title');
   },
   battle() { return Settings.mode === 'battle'; },
   rebuildTeams() {
@@ -552,7 +622,7 @@ const SetupScene = {
     if (c.m.key === 'pic2word') { drawItem(ctx, it, L, y, 76); word(R); arrow(); }
     else if (c.m.key === 'word2pic') { word(L); drawItem(ctx, it, R, y, 76); arrow(); }
     else if (c.m.key === 'jp2en') { txt(ctx, it.jp, L, y, { size: 30, font: FONT_JP, weight: '700', fill: th.primary, shadow: false, maxW: 120 }); word(R); arrow(); }
-    else this.poll.items.slice(0, 3).forEach((item, i) => drawBall(ctx, (i - 1) * 74, y + (i === 1 ? -8 : 0), 34, BALL_COLORS[i], 0, { item }));
+    else this.poll.items.slice(0, 3).forEach((item, i) => drawKirbyBall(ctx, (i - 1) * 74, y + (i === 1 ? -8 : 0), 34, i, 0, { item }));
     txt(ctx, c.m.title, 0, 46, { size: 25, font: FONT_ROUND, fill: th.primary, shadow: false, maxW: w - 30 });
     txt(ctx, c.m.jp, 0, 76, { size: 15, font: FONT_JP, weight: '700', fill: shade(th.primary, 0.35), shadow: false, maxW: w - 24 });
     txt(ctx, String(MODES.indexOf(c.m) + 1), -w / 2 + 20, -h / 2 + 22, { size: 18, font: FONT_ROUND, fill: shade(th.secondary, -0.3), shadow: false });
@@ -624,7 +694,10 @@ const GameScene = {
     this.newBtn = new Button({ x: 790, y: 640, w: 230, h: 70, label: 'NEW GAME', size: 30, color: '#9aa4b8', textColor: '#fff', visible: false, appear: 0, onClick: () => this.leave() });
     this.kanaBtn = new Button({ x: 1100, y: 44, w: 54, circle: true, color: Settings.kana ? th.accent : '#9aa4b8', label: 'カ', size: 26, font: FONT_JP, textColor: '#fff', onClick: () => this.toggleKana() });
     this.buttons = [this.backBtn, this.nextBtn, this.againBtn, this.newBtn, this.kanaBtn, ...cornerButtons(th.buttonColor)];
+    this.mk = null; this.boom = null; this.slash = null;
+    this.flash = { v: 0 };
     this.setupPins(false);
+    Music.play('game');
     this.next();
   },
 
@@ -685,7 +758,7 @@ const GameScene = {
     this.title = null;
     this.hide(this.nextBtn);
     Tween.kill(this.answer); Tween.to(this.answer, { s: 0 }, 0.15);
-    if (this.r > 0) { this.setupPins(true); BowlSfx.reset(); }
+    if (this.r > 0) { this.setupPins(true); BowlSfx.reset(); Sound.play('next'); }
     let choices;
     if (this.battle) {
       this.target = null;
@@ -699,8 +772,7 @@ const GameScene = {
     const cx = laneCX(HOME_Y);
     this.balls = choices.map((it, i) => {
       const x = cx + (i - (n - 1) / 2) * gap;
-      const b = { i, it, correct: it === this.target, hx: x, x, y: HOME_Y, rot: rand(-0.3, 0.3), color: BALL_COLORS[i % 4], appear: 0, lift: new Spring(0, 300, 16), hover: false, state: 'idle', alpha: 1, cardA: 1, glow: 0, p: 0 };
-      if (this.battle) b.color = ['#ff3b5c', '#2f7bff', '#ffae00', '#1fbf5b', '#9b5cff', '#ff7a1a'][i % 6];
+      const b = { i, it, correct: it === this.target, hx: x, x, y: HOME_Y, rot: rand(-0.25, 0.25), color: BALL_COLORS[i % 6], appear: 0, lift: new Spring(0, 300, 16), hover: false, state: 'idle', alpha: 1, cardA: 1, glow: 0, p: 0, sx: 1, sy: 1, back: 0, shake: 0, spin: 0, trail: 0 };
       Tween.to(b, { appear: 1 }, 0.45, { ease: Ease.outBack, delay: 0.35 + i * 0.07 });
       return b;
     });
@@ -710,7 +782,7 @@ const GameScene = {
     Sound.boing();
   },
 
-  ballR(b) { return Math.max(1, (this.battle ? 0.145 : 0.12) * halfW(b.y)); },
+  ballR(b) { return Math.max(1, (this.battle ? 0.145 : 0.125) * halfW(b.y)); },
   ballAt(x, y) {
     if (this.phase !== 'choose') return null;
     return this.balls.find(b => {
@@ -720,7 +792,7 @@ const GameScene = {
       return Math.abs(x - b.hx) < 78 && Math.abs(y - CARD_Y) < 58;
     });
   },
-  mascotHit(x, y) { return Math.abs(x - 112) < 70 && y > 420 && y < 640; },
+  mascotHit(x, y) { return Math.abs(x - 118) < 85 && y > 470 && y < 660; },
   isHot(x, y) { return !!this.ballAt(x, y) || this.mascotHit(x, y) || this.buttons.some(b => b.hit(x, y)); },
 
   onDown(x, y) {
@@ -779,31 +851,85 @@ const GameScene = {
   roll(ball) {
     if (this.phase !== 'choose') return;
     this.phase = 'roll';
-    ball.state = 'roll';
-    Sound.click();
-    this.balls.forEach(b => { if (b !== ball) Tween.to(b, { alpha: 0.35 }, 0.3); });
+    ball.state = 'windup';
+    Sound.play('poke');
+    this.balls.forEach(b => { if (b !== ball) Tween.to(b, { alpha: 0.3 }, 0.3); });
     const n = this.battle ? this.rollPins(this.team()) : (ball.correct ? 10 : 0);
     if (this.battle) this.target = ball.it;
+    ball.n = n;
     const x0 = ball.x, y0 = ball.y;
     const side = x0 < laneCX(y0) - 10 ? -1 : x0 > laneCX(y0) + 10 ? 1 : (Math.random() < 0.5 ? -1 : 1);
-    let onDone;
-    if (n === 0) {
-      const gy = 320, gx = laneCX(gy) + side * (halfW(gy) + gutW(gy) * 0.5);
-      ball.path = [[x0, y0], [lerp(x0, laneCX(400), 0.45), 400], [gx, gy]];
-      onDone = () => this.gutter(ball, side);
-    } else {
-      const u = n === 10 ? rand(0.03, 0.1) : n >= 8 ? rand(0.12, 0.22) : n >= 5 ? rand(0.24, 0.42) : n >= 3 ? rand(0.44, 0.6) : rand(0.64, 0.8);
-      const ex = laneCX(DECK_Y) + side * u * halfW(DECK_Y);
-      ball.path = [[x0, y0], [lerp(x0, ex, 0.7), 400], [ex, DECK_Y + 2]];
-      onDone = () => this.hit(ball, n, ex);
-    }
-    Tween.to(ball.lift, { v: 26 }, 0.18, { ease: Ease.outQuad });
-    Timers.after(0.2, () => {
-      ball.lift.v = 0;
-      Sound.whoosh(0.3);
-      BowlSfx.roll(1.1);
-      Tween.to(ball, { p: 1 }, 1.0, { ease: Ease.inOutQuad, onDone });
+    ball.side = side;
+    // where the ball would meet the pins (a miss still aims at them — until Meta Knight turns up)
+    const u = n === 0 ? rand(0.05, 0.3) : n === 10 ? rand(0.03, 0.1) : n >= 8 ? rand(0.12, 0.22) : n >= 5 ? rand(0.24, 0.42) : n >= 3 ? rand(0.44, 0.6) : rand(0.64, 0.8);
+    ball.ex = laneCX(DECK_Y) + side * u * halfW(DECK_Y);
+    ball.path = [[x0, y0], [lerp(x0, ball.ex, 0.7), 400], [ball.ex, DECK_Y + 2]];
+
+    // 1) anticipation: Kirby crouches, the ball hops, squashes down, shivers and charges up
+    this.mood = 'ready';
+    Tween.to(ball.lift, { v: 24 }, 0.16, { ease: Ease.outQuad });
+    Timers.after(0.16, () => {
+      Tween.to(ball.lift, { v: 0 }, 0.14, { ease: Ease.inQuad });
+      Tween.to(ball, { sx: 1.24, sy: 0.72, back: 18, shake: 1 }, 0.5, { ease: Ease.inOutQuad, delay: 0.12 });
+      Sound.tone(200, 0.62, { type: 'triangle', vol: 0.1, slide: 950, delay: 0.12 });
+      Timers.after(0.12, () => FX.ring(ball.x, ball.y, '#ffffff', 95, 10, 0.5, 'fx', 4));
     });
+    Timers.after(0.82, () => this.launch(ball));
+  },
+
+  // 2) launch: stretch, dust, a shout, and off down the lane trailing stars
+  launch(ball) {
+    ball.state = 'roll';
+    ball.shake = 0; ball.back = 0;
+    ball.sx = 0.78; ball.sy = 1.32;
+    Tween.to(ball, { sx: 1, sy: 1 }, 0.55, { ease: Ease.outElastic });
+    this.mood = 'watch';
+    Sound.play('gaow', { vol: 0.8 });
+    Sound.play('roll', { vol: 0.9 });
+    Sound.whoosh(0.3);
+    FX.dust(ball.x, ball.y + this.ballR(ball) * 0.8, 12, 'fx');
+    Engine.addShake(0.15);
+    if (ball.n === 0) {
+      Tween.to(ball, { p: 0.55 }, 0.6, { ease: Ease.linear, onDone: () => this.metaKnight(ball) });
+      return;
+    }
+    Tween.to(ball, { p: 0.78 }, 0.72, {
+      ease: Ease.linear,
+      onDone: () => {
+        // 3) tension: everything slows right down just before the pins
+        ball.slow = true;
+        this.mood = 'ready';
+        Sound.drumroll(0.62);
+        this.pins.forEach(p => p.wob.kick(rand(-0.6, 0.6)));
+        Tween.to(ball, { p: 1 }, 0.62, { ease: Ease.linear, onDone: () => this.hit(ball, ball.n, ball.ex) });
+      }
+    });
+  },
+
+  // A miss: Meta Knight swoops in and slashes the ball into the gutter
+  metaKnight(ball) {
+    const dash = Math.random() < 0.5;
+    const hx = ball.x, hy = ball.y;
+    this.mk = { src: dash ? KIMG.mkDash : KIMG.mk, w: dash ? 340 : 280, k: 0, a: [1520, hy - 170], b: [hx + 30, hy - 40], c: [-320, hy - 160] };
+    Sound.play(pick(['ohahh', 'eeyee', 'graaah']));
+    this.mood = 'ready';
+    Tween.to(ball, { p: 0.6 }, 0.42, { ease: Ease.outQuad });
+    Tween.to(this.mk, { k: 1 }, 0.82, { ease: Ease.linear, onDone: () => { this.mk = null; } });
+    Timers.after(0.2, () => Sound.play('slash'));
+    Timers.after(0.41, () => this.swat(ball));
+  },
+  swat(ball) {
+    Engine.hitstop = 0.08;
+    Engine.addShake(0.4);
+    Sound.play('impact');
+    this.slash = { x: ball.x, y: ball.y, k: 0 };
+    Tween.to(this.slash, { k: 1 }, 0.32, { onDone: () => { this.slash = null; } });
+    FX.sparkleBurst(ball.x, ball.y, 16, ['#ffffff', '#ffe27a', '#7fd3ff'], 'fx', 1.1);
+    const gy = 300, gx = laneCX(gy) - (halfW(gy) + gutW(gy) * 0.5);   // Meta Knight flies left, so the ball goes left
+    ball.path = [[ball.x, ball.y], [ball.x - 140, ball.y - 6], [gx, gy]];
+    ball.p = 0;
+    ball.spin = -1;
+    Tween.to(ball, { p: 1 }, 0.5, { ease: Ease.outQuad, onDone: () => this.gutter(ball, -1) });
   },
 
   // after reaching the end of its path the ball carries on into the pit and vanishes
@@ -816,6 +942,7 @@ const GameScene = {
 
   knockPin(p, ex, power) {
     p.flying = true;
+    p.teeter = 0; p.trot = 0;
     const dir = Math.sign(p.x - ex) || (Math.random() < 0.5 ? -1 : 1);
     p.vx = dir * rand(60, 260) * power + rand(-40, 40);
     p.vy = -rand(150, 420) * power;
@@ -825,37 +952,79 @@ const GameScene = {
 
   hit(ball, n, ex) {
     const strike = n >= 10;
+    ball.slow = false;
     this.carryOn(ball, laneCX(PIT_Y) + (ex - laneCX(DECK_Y)) * 0.7);
     // which pins go: the ones nearest where the ball came in, front rows first
     const order = this.pins.map(p => ({ p, d: Math.abs(p.x - ex) / halfW(p.y) + p.row * 0.1 + rand(0, 0.12) })).sort((a, b) => a.d - b.d);
-    order.slice(0, n).forEach((o, k) => Timers.after(k * 0.025 + o.p.row * 0.03, () => this.knockPin(o.p, ex, strike ? 1.7 : 1)));
-    this.pins.forEach(p => { if (!order.slice(0, n).some(o => o.p === p)) Timers.after(0.12, () => p.wob.kick(rand(-2, 2))); });
+    const fall = order.slice(0, n).map(o => o.p);
+    // sometimes one pin wobbles on the edge for a moment before deciding
+    let teeter = null, teeterFalls = false;
+    if (n > 0 && n < 10 && Math.random() < 0.65) {
+      teeterFalls = Math.random() < 0.5;
+      teeter = teeterFalls ? fall[fall.length - 1] : order[n].p;
+    }
+    fall.forEach((p, k) => { if (p !== teeter) Timers.after(k * 0.025 + p.row * 0.03, () => this.knockPin(p, ex, strike ? 1.7 : 1)); });
+    this.pins.forEach(p => { if (!fall.includes(p) && p !== teeter) Timers.after(0.12, () => p.wob.kick(rand(-2, 2))); });
     Engine.addShake(0.12 + n * 0.04);
-    if (strike) { Engine.hitstop = 0.06; Engine.doFlash(0.3, '#fff6c8'); }
-    BowlSfx.crash(n);
-    FX.sparkleBurst(ex, 250, 6 + n * 1.6, ['#ffffff', '#ffe27a', this.theme.accent], 'ui', 0.6 + n * 0.07);
+    if (n >= 5) {
+      this.boom = { x: ex, y: 232, k: 0, w: strike ? 560 : 300 };
+      Tween.to(this.boom, { k: 1 }, strike ? 1.0 : 0.6, { ease: Ease.linear, onDone: () => { this.boom = null; } });
+    }
+    if (strike) {
+      Engine.hitstop = 0.09;
+      Engine.doFlash(0.35, '#fff0f8');
+      Sound.play('strike');
+      Music.duck(0.25, 4.5);
+      this.flash.v = 1;
+      Tween.to(this.flash, { v: 0 }, 2.4, { ease: Ease.inQuad });
+    } else {
+      BowlSfx.crash(n);
+      Sound.play('impact', { vol: 0.5 });
+    }
+    FX.sparkleBurst(ex, 250, 6 + n * 1.6, ['#ffffff', '#ffe27a', '#ff8fd8'], 'ui', 0.6 + n * 0.07);
     this.results[this.team()][this.frame()] = this.battle ? n : true;
-    this.mood = n >= 6 ? 'happy' : n <= 3 ? 'sad' : 'idle';
-    Timers.after(0.25, () => {
+
+    let wait = strike ? 0.2 : 0.3;
+    if (teeter) {
+      wait = 1.25;
+      teeter.teeterFalls = teeterFalls;
+      teeter.teeter = 0.001;
+      Tween.to(teeter, { teeter: 1 }, 1.05, {
+        ease: Ease.linear,
+        onDone: () => {
+          teeter.teeter = 0; teeter.trot = 0;
+          if (teeterFalls) { this.knockPin(teeter, ex, 0.7); Sound.thud(); }
+          else { teeter.wob.kick(1.2); Sound.boing(); }
+        }
+      });
+      Timers.after(0.15, () => { this.mood = 'ready'; });
+      for (let i = 0; i < 7; i++) Sound.tone(i % 2 ? 760 : 980, 0.05, { type: 'square', vol: 0.045, delay: 0.2 + i * 0.13 });
+    }
+    Timers.after(wait, () => {
+      this.mood = strike || n >= 7 ? 'happy' : n <= 3 ? 'sad' : 'idle';
       if (strike) {
         this.title = new BigTitle('STRIKE!', { x: 640, y: 380, size: 132 });
-        Sound.fanfare();
+        Sound.play('pk');
         FX.confettiCannon(380, 720, 1, 50);
         FX.confettiCannon(900, 720, -1, 50);
       } else {
-        this.title = new BigTitle(n === 1 ? '1 PIN!' : `${n} PINS!`, { x: 640, y: 380, size: 116, colors: ['#ffffff', '#bff3ff', '#3bb8ff'], outline: '#0d3a66' });
-        if (n >= 6) Sound.chime(); else Sound.boing();
+        this.title = new BigTitle(n === 1 ? '1 PIN!' : `${n} PINS!`, { x: 640, y: 380, size: 116, colors: ['#ffffff', '#ffd6ec', '#ff6fb5'], outline: '#7a1048' });
+        if (n >= 7) { Sound.chime(); Sound.play('chitzu', { vol: 0.8 }); }
+        else if (n <= 3) Sound.play(pick(['uhawa', 'uheeha']));
+        else Sound.boing();
       }
     });
-    Timers.after(1.2, () => this.showResult());
+    Timers.after(wait + 1.0, () => this.showResult());
   },
 
   gutter(ball, side) {
+    ball.spin = 0;
     this.carryOn(ball, laneCX(PIT_Y) + side * (halfW(PIT_Y) + gutW(PIT_Y) * 0.5), 0.45);
     BowlSfx.gutter();
     this.pins.forEach(p => p.wob.kick(rand(-1.5, 1.5)));
     this.results[this.team()][this.frame()] = this.battle ? 0 : false;
-    this.mood = 'sad';
+    this.mood = pick(['sad', 'angry']);
+    Sound.play(pick(['uhawa', 'uheeha', 'yaaa']), { delay: 0.1 });
     Timers.after(0.35, () => {
       this.title = new BigTitle(this.battle ? 'GUTTER!' : 'MISS!', { x: 640, y: 380, size: 116, colors: ['#ffffff', '#c9d6ff', '#7d8fd6'], outline: '#1d2b5a' });
       BowlSfx.miss();
@@ -864,7 +1033,7 @@ const GameScene = {
       const right = this.balls.find(b => b.correct);
       Timers.after(0.9, () => { Tween.to(right, { alpha: 1, glow: 1 }, 0.3); Sound.chime(); });
     }
-    Timers.after(1.3, () => this.showResult());
+    Timers.after(1.4, () => this.showResult());
   },
 
   showResult() {
@@ -887,6 +1056,10 @@ const GameScene = {
     Tween.to(this.over, { s: 1 }, 0.6, { ease: Ease.outBack });
     Timers.after(0.5, () => { this.show(this.againBtn); this.show(this.newBtn); });
     Sound.fanfare();
+    Music.play('end');
+    Sound.play('crowd', { vol: 0.45 });
+    Sound.play('haragong', { delay: 0.6 });
+    Sound.play('chitzu', { delay: 1.5 });
     Timers.after(0.3, () => { FX.confettiCannon(200, 720, 1, 80); FX.confettiCannon(1080, 720, -1, 80); });
     Timers.after(1.0, () => FX.firework(640, 160, this.theme.accent));
   },
@@ -904,9 +1077,14 @@ const GameScene = {
         const [[ax, ay], [cx, cy], [ex, ey]] = b.path, u = b.p;
         const nx = (1 - u) * (1 - u) * ax + 2 * (1 - u) * u * cx + u * u * ex;
         const ny = (1 - u) * (1 - u) * ay + 2 * (1 - u) * u * cy + u * u * ey;
-        b.rot += (nx - b.x) / Math.max(4, this.ballR(b)) * 0.6;
+        b.rot += Math.hypot(nx - b.x, ny - b.y) / Math.max(4, this.ballR(b)) * 0.55 * (b.side || 1) + b.spin * dt * 22;
         b.x = nx; b.y = ny;
-        b.cardA = Math.max(0, 1 - u * 3);
+        b.cardA = Math.min(b.cardA, Math.max(0, 1 - u * 3));
+        b.trail -= dt;
+        if (b.trail <= 0 && b.y > DECK_Y + 10) {
+          b.trail = b.slow ? 0.03 : 0.05;
+          FX.sparkleBurst(b.x + rand(-6, 6), b.y + rand(-6, 6), 1, ['#fff6b0', '#ffffff', b.color], 'fx', 0.35);
+        }
       } else if (b.carry) {
         const c = b.carry, k = c.o.k;
         b.x = lerp(c.fx, c.toX, k);
@@ -921,6 +1099,9 @@ const GameScene = {
         pin.y += pin.vy * dt;
         pin.rot += pin.vr * dt;
         pin.alpha = Math.max(0, pin.alpha - dt * 1.1);
+      } else if (pin.teeter > 0) {
+        const k = pin.teeter, amp = pin.teeterFalls ? 0.12 + 0.4 * k : 0.42 * (1 - k * 0.8);
+        pin.trot = Math.sin(k * TAU * 4.5) * amp;
       }
     }
     if (this.title) this.title.update(dt);
@@ -936,11 +1117,15 @@ const GameScene = {
     ctx.beginPath(); ctx.rect(...PIN_CLIP); ctx.clip();
     for (const pin of this.pins) {
       if (pin.alpha <= 0.01) continue;
-      drawPin(ctx, pin.x, pin.y + pin.off, pin.h, { rot: pin.rot + pin.wob.v * 0.12, alpha: pin.alpha, noShadow: pin.flying });
+      drawPin(ctx, pin.x, pin.y + pin.off, pin.h, { rot: pin.rot + pin.wob.v * 0.12 + (pin.trot || 0), alpha: pin.alpha, noShadow: pin.flying });
     }
     ctx.restore();
+    this.drawBoom(ctx);
+    this.drawLights(ctx);
     for (const b of this.balls) this.drawCardFor(ctx, b);
     for (const b of this.balls) if (!deep(b)) this.drawBallFor(ctx, b);
+    Particles.draw(ctx, 'world');
+    this.drawMetaKnight(ctx);
     this.drawScoreboard(ctx);
     this.drawFrameBanner(ctx);
     this.drawMascot(ctx);
@@ -1006,17 +1191,88 @@ const GameScene = {
   drawBallFor(ctx, b) {
     if (b.appear <= 0.01 || b.state === 'gone') return;
     const r = this.ballR(b) * b.appear;
-    const deep = b.state !== 'idle' && b.y < DECK_Y + 30;
+    const deep = b.state !== 'idle' && b.state !== 'windup' && b.y < DECK_Y + 30;
     if (deep) { ctx.save(); ctx.beginPath(); ctx.rect(500, PIT_Y, 300, 600); ctx.clip(); }
-    if (b.hover && b.state === 'idle') Glow.draw(ctx, b.color, b.x, b.y - b.lift.v, r * 2, 0.5);
-    drawBall(ctx, b.x, b.y - b.lift.v, r, b.color, b.rot, { alpha: b.alpha, item: this.battle ? b.it : null, spin: this.battle ? b.rot * 0.5 : 0 });
+    let x = b.x, y = b.y - b.lift.v + b.back, sx = b.sx, sy = b.sy, rot = b.rot;
+    if (b.shake > 0) x += Math.sin(this.t * 70) * 3.5 * b.shake;
+    if (b.state === 'idle') {      // the waiting balls breathe and wobble a little
+      const w = Math.sin(this.t * 3 + b.i * 1.3);
+      sy *= 1 + w * 0.025; sx *= 1 - w * 0.02;
+      rot += Math.sin(this.t * 1.7 + b.i) * 0.06 + (b.hover ? Math.sin(this.t * 12) * 0.08 : 0);
+    }
+    if (b.hover && b.state === 'idle') Glow.draw(ctx, b.color, x, y, r * 2, 0.5);
+    if (b.glow > 0.01) Glow.draw(ctx, '#7dff9a', x, y, r * 2.2, b.glow * 0.6);
+    drawKirbyBall(ctx, x, y, r, b.i, rot, { alpha: b.alpha, sx, sy, item: this.battle ? b.it : null });
     if (this.battle && b.state === 'idle') {
       ctx.fillStyle = b.color;
-      ctx.beginPath(); ctx.arc(b.x - r * 0.78, b.y - b.lift.v - r * 0.78, 14, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(x - r * 0.78, y - r * 0.78, 14, 0, TAU); ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-      txt(ctx, String(b.i + 1), b.x - r * 0.78, b.y - b.lift.v - r * 0.78 + 1, { size: 16, font: FONT_ROUND, fill: '#fff', shadow: false });
+      txt(ctx, String(b.i + 1), x - r * 0.78, y - r * 0.78 + 1, { size: 16, font: FONT_ROUND, fill: '#fff', shadow: false });
     }
     if (deep) ctx.restore();
+  },
+
+  // spotlights over the lane (from the PowerPoint); they flash on a strike
+  drawLights(ctx) {
+    const img = Images.get(KIMG.light);
+    if (!img) return;
+    const f = this.flash.v;
+    const a = 0.16 + Math.sin(this.t * 2) * 0.04 + f * (0.5 + 0.3 * Math.sin(this.t * 34));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = clamp(a, 0, 1);
+    [[330, -1], [960, 1]].forEach(([x, s]) => {
+      ctx.save();
+      ctx.translate(x, -70);
+      ctx.rotate(s * (0.18 + Math.sin(this.t * (0.8 + f * 6)) * (0.06 + f * 0.15)));
+      ctx.drawImage(img, -270, 0, 540, 490);
+      ctx.restore();
+    });
+    ctx.restore();
+  },
+
+  drawBoom(ctx) {
+    const e = this.boom, img = Images.get(KIMG.boom);
+    if (!e || !img) return;
+    const k = e.k, s = 0.35 + Ease.outCubic(Math.min(1, k * 1.6)) * 0.85;
+    const w = e.w * s, h = w * img.naturalHeight / img.naturalWidth;
+    ctx.save();
+    ctx.globalAlpha = k < 0.5 ? 1 : 1 - (k - 0.5) * 2;
+    ctx.drawImage(img, e.x - w / 2, e.y - h * 0.62, w, h);
+    ctx.restore();
+  },
+
+  drawMetaKnight(ctx) {
+    const m = this.mk;
+    if (m) {
+      const img = Images.get(m.src);
+      const at = k => { const u = clamp(k, 0, 1); return [0, 1].map(j => (1 - u) * (1 - u) * m.a[j] + 2 * (1 - u) * u * m.b[j] + u * u * m.c[j]); };
+      if (img) {
+        const h = m.w * img.naturalHeight / img.naturalWidth;
+        [[m.k - 0.08, 0.18], [m.k - 0.04, 0.35], [m.k, 1]].forEach(([k, al]) => {
+          const [x, y] = at(k);
+          ctx.save();
+          ctx.globalAlpha = al;
+          ctx.translate(x, y);
+          ctx.rotate(-0.12 + k * 0.2);
+          ctx.drawImage(img, -m.w / 2, -h / 2, m.w, h);
+          ctx.restore();
+        });
+      }
+    }
+    const sl = this.slash;
+    if (sl) {
+      ctx.save();
+      ctx.translate(sl.x, sl.y);
+      ctx.rotate(-0.5);
+      ctx.globalAlpha = 1 - sl.k;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineCap = 'round';
+      ctx.shadowColor = '#7fd3ff'; ctx.shadowBlur = 18;
+      ctx.lineWidth = 12 * (1 - sl.k) + 2;
+      ctx.beginPath(); ctx.arc(0, 0, 50 + sl.k * 50, Math.PI * 0.9, Math.PI * 1.9); ctx.stroke();
+      ctx.restore();
+    }
   },
 
   drawFrameBanner(ctx) {
@@ -1064,8 +1320,8 @@ const GameScene = {
   },
 
   drawMascot(ctx) {
-    drawPinny(ctx, 112, 632, 190, this.mood, this.t);
-    if (!this.showQ && this.phase === 'choose') drawHand(ctx, 180, 470 + Math.sin(this.t * 5) * 6, 0.7);
+    drawKirbyHost(ctx, 118, 652, 175, this.mood, this.t);
+    if (!this.showQ && this.phase === 'choose') drawHand(ctx, 200, 500 + Math.sin(this.t * 5) * 6, 0.7);
   },
 
   drawQuestion(ctx) {
@@ -1190,6 +1446,12 @@ const GameScene = {
         txt(ctx, 'pins', 250, y + 4, { size: rh * 0.34, font: FONT_ROUND, fill: '#8a8aa0', shadow: false });
       });
     }
+    // celebrating Kirbys in front of the card
+    const dk = Images.get(KIMG.double);
+    if (dk) {
+      const w = 280, h = w * dk.naturalHeight / dk.naturalWidth, bob = Math.abs(Math.sin(this.t * 4)) * 16;
+      ctx.drawImage(dk, 480 - w / 2, 250 - h - bob, w, h);
+    }
     ctx.restore();
   }
 };
@@ -1214,8 +1476,8 @@ function drawCrown(ctx, x, y, s) {
 // ------------------------------------------------------------ boot
 window.addEventListener('DOMContentLoaded', () => {
   Settings.load();
-  Engine.transIcon = 'favicon.png';
-  Images.load('favicon.png');
+  Engine.transIcon = ballSrc(0);
+  Images.load(ballSrc(0));
   Engine.init(document.getElementById('game'));
   Engine.setScene(LoadingScene);
 });
