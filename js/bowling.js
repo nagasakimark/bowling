@@ -465,7 +465,7 @@ const MenuScene = {
     ctx.restore();
     txt(ctx, 'Pick a category!  カテゴリーを えらんでね', 640, 196, { size: 26, font: FONT_ROUND, fill: MENU_THEME.primary, shadow: false });
     for (const tl of this.tiles) this.drawTile(ctx, tl, t);
-    txt(ctx, 'In the game:  1–6 roll a ball  ·  ENTER next  ·  Q (or tap Kirby) hide question  ·  K katakana  ·  ESC back  ·  M mute  ·  F fullscreen', 640, 706, {
+    txt(ctx, 'In the game:  1–3 roll a ball  ·  ENTER next  ·  Q (or tap Kirby) hide question  ·  K katakana  ·  ESC back  ·  M mute  ·  F fullscreen', 640, 706, {
       size: 15, font: FONT_ROUND, weight: '600', fill: 'rgba(60,20,120,0.5)', shadow: false
     });
     this.buttons.forEach(b => b.draw(ctx));
@@ -649,7 +649,8 @@ const DECK_Y = 286;                  // front edge of the pin deck
 const PIT_Y = 188;                   // bottom edge of the pinsetter hood
 const PIN_ROWS = [288, 278, 268, 258];   // front → back
 const PIN_CLIP = [556, PIT_Y, 182, 240]; // the opening between the pillars
-const HOME_Y = 545, CARD_Y = 645;
+const HOME_Y = 470, CARD_TOP = 545;   // 3 big balls; a big card under each one
+const NBALLS = 3, BALL_GAP = 240;
 
 // Team Battle: how often each pin count (0–10) comes up before any balancing
 const PIN_ODDS = [3, 2, 3, 3, 4, 6, 9, 12, 14, 13, 21];
@@ -762,13 +763,13 @@ const GameScene = {
     let choices;
     if (this.battle) {
       this.target = null;
-      choices = shuffle(this.items).slice(0, Math.min(6, this.items.length));
+      choices = shuffle(this.items).slice(0, Math.min(NBALLS, this.items.length));
     } else {
       this.target = this.queue[this.r];
-      const others = shuffle(this.items.filter(it => it !== this.target)).slice(0, 3);
+      const others = shuffle(this.items.filter(it => it !== this.target)).slice(0, NBALLS - 1);
       choices = shuffle([this.target, ...others]);
     }
-    const n = choices.length, gap = this.battle ? (n > 5 ? 124 : 140) : 172;
+    const n = choices.length, gap = BALL_GAP;
     const cx = laneCX(HOME_Y);
     this.balls = choices.map((it, i) => {
       const x = cx + (i - (n - 1) / 2) * gap;
@@ -782,14 +783,14 @@ const GameScene = {
     Sound.boing();
   },
 
-  ballR(b) { return Math.max(1, (this.battle ? 0.145 : 0.125) * halfW(b.y)); },
+  ballR(b) { return Math.max(1, 0.205 * halfW(b.y)); },
   ballAt(x, y) {
     if (this.phase !== 'choose') return null;
     return this.balls.find(b => {
       if (b.appear < 0.6) return false;
       if (Math.hypot(x - b.x, y - b.y) < this.ballR(b) + 8) return true;
-      if (this.battle) return Math.abs(x - b.hx) < 58 && Math.abs(y - (HOME_Y + 74)) < 22;
-      return Math.abs(x - b.hx) < 78 && Math.abs(y - CARD_Y) < 58;
+      const { w, h } = this.cardSize();
+      return Math.abs(x - b.hx) < w / 2 && y > CARD_TOP - 6 && y < CARD_TOP + h + 6;
     });
   },
   mascotHit(x, y) { return Math.abs(x - 118) < 85 && y > 470 && y < 660; },
@@ -807,7 +808,7 @@ const GameScene = {
     if (k === 'Escape') this.leave();
     else if (k === 'q' || k === 'Q') this.toggleQuestion();
     else if (k === 'k' || k === 'K') this.toggleKana();
-    else if (this.phase === 'choose' && /^[1-6]$/.test(k)) { const b = this.balls[+k - 1]; if (b) this.roll(b); }
+    else if (this.phase === 'choose' && /^[1-3]$/.test(k)) { const b = this.balls[+k - 1]; if (b) this.roll(b); }
     else if ((k === 'Enter' || k === ' ' || k === 'ArrowRight') && this.phase === 'result' && this.nextBtn.appear > 0.5) this.next();
     else if (k === 'Enter' && this.phase === 'over') this.restart();
   },
@@ -1150,41 +1151,39 @@ const GameScene = {
     g.fillRect(v.x, v.y, v.w, v.h);
   },
 
-  cardSize() { return this.mode === 'word2pic' ? { w: 150, h: 104 } : { w: 160, h: 74 }; },
+  // Cards are big so the back of the classroom can read them
+  cardSize() {
+    const kana = Settings.kana;
+    if (this.battle) return { w: 212, h: kana ? 170 : 160 };
+    if (this.mode === 'word2pic') return { w: 212, h: 160 };
+    return { w: 212, h: kana ? 108 : 92 };
+  },
 
   drawCardFor(ctx, b) {
     if (b.appear <= 0.01 || b.cardA <= 0.01) return;
-    if (this.battle) { this.drawLabelFor(ctx, b); return; }
-    const { w, h } = this.cardSize();
+    const { w, h } = this.cardSize(), kana = Settings.kana;
     ctx.save();
-    ctx.translate(b.hx, CARD_Y);
-    const s = b.appear * (1 + b.lift.v * 0.004);
+    ctx.translate(b.hx, CARD_TOP + h / 2);
+    const s = b.appear * (1 + b.lift.v * 0.003);
     ctx.scale(s, s);
     ctx.globalAlpha *= b.alpha * b.cardA;
-    if (b.glow > 0.01) Glow.draw(ctx, '#7dff9a', 0, 0, 140, b.glow * (0.6 + Math.sin(this.t * 8) * 0.25));
-    drawCard(ctx, -w / 2, -h / 2, w, h, { border: b.glow > 0.5 ? '#21c25a' : b.color, lw: b.glow > 0.5 ? 7 : 5, base: shade(b.color, -0.2), r: 18 });
-    if (this.mode === 'word2pic') drawItem(ctx, b.it, 0, 0, h - 18);
-    else {
-      const kana = Settings.kana;
-      txt(ctx, b.it.en, 0, kana ? -11 : 1, { size: 32, font: FONT_ROUND, fill: shade(b.color, -0.45), shadow: false, maxW: w - 20 });
-      if (kana) txt(ctx, b.it.katakana, 0, 22, { size: 16, font: FONT_JP, weight: '700', fill: '#6a5a90', shadow: false, maxW: w - 16 });
+    if (b.glow > 0.01) Glow.draw(ctx, '#7dff9a', 0, 0, 170, b.glow * (0.6 + Math.sin(this.t * 8) * 0.25));
+    drawCard(ctx, -w / 2, -h / 2, w, h, { border: b.glow > 0.5 ? '#21c25a' : b.color, lw: b.glow > 0.5 ? 8 : 6, base: shade(b.color, -0.2), r: 20 });
+    const ink = shade(b.color, -0.45);
+    if (this.battle) {
+      drawItem(ctx, b.it, 0, -h / 2 + (kana ? 60 : 64), kana ? 100 : 112);
+      txt(ctx, b.it.en, 0, h / 2 - (kana ? 44 : 26), { size: 30, font: FONT_ROUND, fill: ink, shadow: false, maxW: w - 20 });
+      if (kana) txt(ctx, b.it.katakana, 0, h / 2 - 16, { size: 18, font: FONT_JP, weight: '700', fill: '#6a5a90', shadow: false, maxW: w - 16 });
+    } else if (this.mode === 'word2pic') {
+      drawItem(ctx, b.it, 0, 0, h - 22);
+    } else {
+      txt(ctx, b.it.en, 0, kana ? -14 : 2, { size: 44, font: FONT_ROUND, fill: ink, shadow: false, maxW: w - 24 });
+      if (kana) txt(ctx, b.it.katakana, 0, 30, { size: 20, font: FONT_JP, weight: '700', fill: '#6a5a90', shadow: false, maxW: w - 20 });
     }
     ctx.fillStyle = b.color;
-    ctx.beginPath(); ctx.arc(-w / 2 + 6, -h / 2 + 6, 15, 0, TAU); ctx.fill();
-    txt(ctx, String(b.i + 1), -w / 2 + 6, -h / 2 + 7, { size: 18, font: FONT_ROUND, fill: '#fff', shadow: false });
-    ctx.restore();
-  },
-
-  // Team Battle: a name plate under each ball
-  drawLabelFor(ctx, b) {
-    const kana = Settings.kana, w = 116, h = kana ? 48 : 36;
-    ctx.save();
-    ctx.translate(b.hx, HOME_Y + 74 + (kana ? 6 : 0));
-    ctx.scale(b.appear, b.appear);
-    ctx.globalAlpha *= b.alpha * b.cardA;
-    drawCard(ctx, -w / 2, -h / 2, w, h, { border: b.color, lw: 4, base: shade(b.color, -0.2), r: 14 });
-    txt(ctx, b.it.en, 0, kana ? -8 : 1, { size: 21, font: FONT_ROUND, fill: shade(b.color, -0.45), shadow: false, maxW: w - 14 });
-    if (kana) txt(ctx, b.it.katakana, 0, 13, { size: 13, font: FONT_JP, weight: '700', fill: '#6a5a90', shadow: false, maxW: w - 12 });
+    ctx.beginPath(); ctx.arc(-w / 2 + 8, -h / 2 + 8, 19, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+    txt(ctx, String(b.i + 1), -w / 2 + 8, -h / 2 + 9, { size: 22, font: FONT_ROUND, fill: '#fff', shadow: false });
     ctx.restore();
   },
 
@@ -1202,13 +1201,7 @@ const GameScene = {
     }
     if (b.hover && b.state === 'idle') Glow.draw(ctx, b.color, x, y, r * 2, 0.5);
     if (b.glow > 0.01) Glow.draw(ctx, '#7dff9a', x, y, r * 2.2, b.glow * 0.6);
-    drawKirbyBall(ctx, x, y, r, b.i, rot, { alpha: b.alpha, sx, sy, item: this.battle ? b.it : null });
-    if (this.battle && b.state === 'idle') {
-      ctx.fillStyle = b.color;
-      ctx.beginPath(); ctx.arc(x - r * 0.78, y - r * 0.78, 14, 0, TAU); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
-      txt(ctx, String(b.i + 1), x - r * 0.78, y - r * 0.78 + 1, { size: 16, font: FONT_ROUND, fill: '#fff', shadow: false });
-    }
+    drawKirbyBall(ctx, x, y, r, b.i, rot, { alpha: b.alpha, sx, sy, item: null });
     if (deep) ctx.restore();
   },
 
